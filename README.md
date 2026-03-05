@@ -30,6 +30,84 @@ Each machine reports parameters relevant to its process stage:
 - Streaming simulator: ~8% of records on anomaly lines have 1-3 correlated parameters pushed outside thresholds
 - Every record includes an `is_anomaly` boolean flag
 
+## Medallion Architecture & Dimensional Model
+
+Data flows through three layers using Spark Declarative Pipelines (SDP):
+
+```
+  Volume (JSONL files)
+         │
+         ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │  BRONZE: bronze_raw_telemetry                               │
+  │  Raw JSONL lines as plain text + file metadata              │
+  │  (source file path, file timestamp, file size, ingested_at) │
+  └──────────────────────────┬──────────────────────────────────┘
+                             │  from_json() + to_timestamp()
+                             ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │  SILVER: silver_telemetry                                   │
+  │  Parsed, typed columns + data quality constraints           │
+  │  telemetry MAP<STRING, DOUBLE> + _source_file + _loaded_at  │
+  └──────────────────────────┬──────────────────────────────────┘
+                             │  explode(telemetry) + dimensions
+                             ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │  GOLD: Star Schema (4 dimensions + 1 fact)                  │
+  │  Dimensional model for analytics and BI                     │
+  └─────────────────────────────────────────────────────────────┘
+```
+
+### Gold Star Schema
+
+```
+                         ┌──────────────────────────┐
+                         │  gold_dim_production_line │
+                         ├──────────────────────────┤
+                         │  line_id  (PK)           │
+                         │  line_name               │
+                         │  product_type            │
+                         │  target_freq_band_min    │
+                         │  target_freq_band_max    │
+                         │  target_bandwidth_ghz    │
+                         └────────────┬─────────────┘
+                                      │
+┌────────────────────┐   ┌────────────┴─────────────────────┐   ┌────────────────────┐
+│  gold_dim_machine  │   │      gold_fact_telemetry         │   │  gold_dim_date     │
+├────────────────────┤   ├──────────────────────────────────┤   ├────────────────────┤
+│  machine_id  (PK)  │   │  record_id                      │   │  date_key  (PK)    │
+│  machine_type      ├──►│  event_timestamp                 │◄──┤  full_date         │
+│  process_stage     │   │  date_key        → dim_date      │   │  year              │
+│  line_id           │   │  hour_of_day                     │   │  quarter           │
+└────────────────────┘   │  plant_id                        │   │  month / month_name│
+                         │  line_id         → dim_prod_line │   │  day_of_month      │
+┌────────────────────┐   │  machine_id      → dim_machine   │   │  day_of_week       │
+│gold_dim_process    │   │  process_stage   → dim_process   │   │  day_name          │
+│      _stage        │   │  is_anomaly                      │   │  week_of_year      │
+├────────────────────┤   │  parameter_name    ← exploded    │   │  is_weekend        │
+│  process_stage(PK) ├──►│  parameter_value  ← from MAP     │   └────────────────────┘
+│  stage_sequence    │   │  _source_file                    │
+│  stage_category    │   │  _loaded_at                      │
+└────────────────────┘   └──────────────────────────────────┘
+```
+
+**Fact grain:** One row per (telemetry reading x sensor parameter). The silver `telemetry` MAP is exploded so each sensor parameter becomes its own row (~2.8M fact rows from 300K readings).
+
+**Dimensions:**
+
+| Dimension | Rows | Description |
+|-----------|------|-------------|
+| `gold_dim_production_line` | 4 | Line attributes, product type, target frequency band |
+| `gold_dim_machine` | 20 | Machine type, process stage, parent production line |
+| `gold_dim_date` | varies | Calendar attributes (year, quarter, month, day, weekend flag) |
+| `gold_dim_process_stage` | 20 | Stage sequence ordering (1-5) and category grouping (Deposition, Etching, etc.) |
+
+### Pipeline
+
+Pipeline ID: `927d34e6-eb65-401e-aa71-23483ca134d8`
+
+All three layers run in a single Spark Declarative Pipeline with Auto Loader for incremental ingestion. Both SQL and Python SDP versions are provided.
+
 ## Files
 
 | File | Description |
@@ -37,6 +115,12 @@ Each machine reports parameters relevant to its process stage:
 | `rf_filter_plant_telemetry.json` | Reference snapshot — full plant structure with all machines, parameters, constraints, and thresholds |
 | `generate_telemetry.py` | Batch generator — produces 300K+ JSONL records across 6 files |
 | `stream_telemetry.py` | Streaming simulator — generates small JSONL files and uploads to Databricks volume |
+| `pipelines_sql/01_bronze_raw_telemetry.sql` | Bronze SDP — raw text ingestion with file metadata |
+| `pipelines_sql/02_silver_telemetry.sql` | Silver SDP — JSON parsing, typing, quality constraints |
+| `pipelines_sql/03_gold_dimensional.sql` | Gold SDP — star schema dimensions + fact table |
+| `pipelines/01_bronze_raw_telemetry.py` | Bronze SDP (Python version) |
+| `pipelines/02_silver_telemetry.py` | Silver SDP (Python version) |
+| `pipelines/03_gold_dimensional.py` | Gold SDP (Python version) |
 
 ## Databricks Volume
 
