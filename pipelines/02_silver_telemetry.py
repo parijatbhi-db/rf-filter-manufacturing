@@ -10,7 +10,7 @@
 # COMMAND ----------
 
 import dlt
-from pyspark.sql.functions import col, from_json, to_timestamp
+from pyspark.sql.functions import col, current_timestamp, from_json, to_timestamp
 from pyspark.sql.types import (
     StructType, StructField, StringType, BooleanType, DoubleType, MapType
 )
@@ -45,8 +45,8 @@ TELEMETRY_SCHEMA = StructType([
 # - Sources from the bronze streaming table via dlt.read_stream().
 # - Parses the raw_content JSON string into typed columns using from_json().
 # - Converts the ISO-8601 timestamp string to a proper Spark TimestampType.
-# - Carries forward the bronze metadata columns (_source_file, _ingested_at)
-#   for end-to-end lineage.
+# - Only the source file name is kept from bronze for lineage (not the full
+#   metadata). Silver has its own _loaded_at timestamp.
 # - Partitioned by line_id for efficient downstream analytics per production line.
 # - Data quality expectations:
 #     valid_record_id  : record_id must not be null
@@ -87,12 +87,9 @@ def silver_telemetry():
             col("parsed.process_stage").alias("process_stage"),
             col("parsed.is_anomaly").alias("is_anomaly"),
             col("parsed.telemetry").alias("telemetry"),
-            # Carry forward bronze metadata for lineage
+            # Source file name only (not full path or other bronze metadata)
             col("_source_file"),
-            col("_source_file_timestamp"),
-            col("_source_file_size"),
-            col("_ingested_at").alias("_bronze_ingested_at"),
-            # Keep the raw struct for debugging; drop in gold if not needed
-            col("parsed"),
+            # Silver layer's own load timestamp
+            current_timestamp().alias("_loaded_at"),
         )
     )

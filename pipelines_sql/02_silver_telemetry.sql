@@ -24,8 +24,8 @@
 --       valid_record_id  : record_id must not be null
 --       valid_timestamp  : parsed event_timestamp must not be null
 --       valid_machine_id : machine_id must not be null
---   - Bronze metadata columns (_source_file, _ingested_at) are carried forward
---     for end-to-end lineage.
+--   - Only the source file name is kept from bronze for lineage (not the full
+--     metadata). Silver has its own _loaded_at timestamp.
 
 -- COMMAND ----------
 
@@ -84,13 +84,9 @@ SELECT
   parsed.is_anomaly                                   AS is_anomaly,
   parsed.telemetry                                    AS telemetry,
 
-  -- Carry forward bronze metadata for end-to-end lineage
-  _source_file,                                       -- Original JSONL file path
-  _source_file_timestamp,                             -- File modification time
-  _source_file_size,                                  -- File size in bytes
-  _ingested_at                                        AS _bronze_ingested_at,  -- When bronze ingested this row
-
-  -- Keep the raw parsed struct for debugging; can be dropped in gold layer
-  parsed
+  -- Source file name only (not full path or other bronze metadata)
+  _source_file,                                       -- Original JSONL file name for lineage
+  -- Silver layer's own load timestamp
+  current_timestamp()                                 AS _loaded_at
 
 FROM parsed_data;
