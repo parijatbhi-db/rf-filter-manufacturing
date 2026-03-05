@@ -49,10 +49,9 @@ TELEMETRY_SCHEMA = StructType([
 #   metadata). Silver has its own _loaded_at timestamp.
 # - Partitioned by line_id for efficient downstream analytics per production line.
 # - Data quality expectations:
-#     valid_record_id  : record_id must not be null
+#     valid_record_id  : record_id must not be null (also validates JSON parsed OK)
 #     valid_timestamp  : parsed event_timestamp must not be null
 #     valid_machine_id : machine_id must not be null
-#     valid_json_parse : from_json must succeed (parsed struct is not null)
 @dlt.table(
     name="silver_telemetry",
     comment="Parsed and typed machine telemetry with data quality constraints. Sourced from bronze raw landing table.",
@@ -62,7 +61,6 @@ TELEMETRY_SCHEMA = StructType([
     },
     partition_cols=["line_id"],
 )
-@dlt.expect("valid_json_parse", "parsed IS NOT NULL")
 @dlt.expect("valid_record_id", "record_id IS NOT NULL")
 @dlt.expect("valid_timestamp", "event_timestamp IS NOT NULL")
 @dlt.expect("valid_machine_id", "machine_id IS NOT NULL")

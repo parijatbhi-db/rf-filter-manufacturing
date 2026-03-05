@@ -20,8 +20,7 @@
 --   - Partitioned by line_id for efficient downstream analytics per production line.
 --   - Data quality constraints (EXPECT) log violations to the pipeline event log
 --     without dropping records:
---       valid_json_parse : from_json must succeed (parsed struct is not null)
---       valid_record_id  : record_id must not be null
+--       valid_record_id  : record_id must not be null (also validates JSON parsed OK)
 --       valid_timestamp  : parsed event_timestamp must not be null
 --       valid_machine_id : machine_id must not be null
 --   - Only the source file name is kept from bronze for lineage (not the full
@@ -32,7 +31,6 @@
 CREATE OR REFRESH STREAMING TABLE silver_telemetry (
   -- Data quality constraints: violations are tracked in the pipeline event log
   -- but records are NOT dropped (default EXPECT behavior = warn and keep)
-  CONSTRAINT valid_json_parse EXPECT (parsed IS NOT NULL),
   CONSTRAINT valid_record_id  EXPECT (record_id IS NOT NULL),
   CONSTRAINT valid_timestamp  EXPECT (event_timestamp IS NOT NULL),
   CONSTRAINT valid_machine_id EXPECT (machine_id IS NOT NULL)
